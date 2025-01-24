@@ -1,0 +1,4 @@
+/Applications/CLion.app/Contents/bin/cmake/mac/aarch64/bin/cmake -DCMAKE_BUILD_TYPE=Debug -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_C_FLAGS=-I/opt/homebrew/Cellar/zeromq/4.3.5_1/include -L/opt/homebrew/Cellar/zeromq/4.3.5_1/lib" -S /Users/egorordinarcev/Desktop/praxis3 -B /Users/egorordinarcev/Desktop/praxis3/cmake-build-debug
+-- Configuring done (0.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Users/egorordinarcev/Desktop/praxis3/cmake-build-debug
