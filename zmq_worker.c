@@ -51,9 +51,7 @@ static void add_word_tail(WordCount **head, WordCount **tail, const char *w, int
     }
 }
 
-// -----------------------------------------------------------------------------
 // map_function: разбирает payload -> "the11example11..."
-// -----------------------------------------------------------------------------
 static char *map_function(const char *payload) {
     char *copy = strdup(payload);
     // Всё не-буквенное -> ' ', tolower
@@ -82,7 +80,6 @@ static char *map_function(const char *payload) {
     WordCount *p = head;
     while (p) {
         int wlen = (int)strlen(p->word);
-        // Проверка места
         if (pos + wlen >= MSG_SIZE - 1) {
             break;
         }
@@ -111,10 +108,7 @@ static char *map_function(const char *payload) {
     return result;
 }
 
-// -----------------------------------------------------------------------------
 // reduce_function: "the11example11..." -> "the2example2..."
-// Аналогично, сохраняем порядок слов как в payload
-// -----------------------------------------------------------------------------
 static char *reduce_function(const char *payload) {
     WordCount *head = NULL;
     WordCount *tail = NULL;
@@ -150,7 +144,7 @@ static char *reduce_function(const char *payload) {
     memset(result, 0, sizeof(result));
     int pos = 0;
 
-    // Собираем "word + число" в том же порядке
+    // Собираем "word + число"
     WordCount *p = head;
     while (p) {
         int wlen = (int)strlen(p->word);
@@ -206,7 +200,6 @@ int main(int argc, char *argv[]) {
 
     int linger = 0;
     zmq_setsockopt(responder, ZMQ_LINGER, &linger, sizeof(linger));
-
     int rcvtime = 2000; // 2с
     zmq_setsockopt(responder, ZMQ_RCVTIMEO, &rcvtime, sizeof(rcvtime));
 
@@ -221,7 +214,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Цикл
+    // Основной цикл
     while (1) {
         char buffer[MSG_SIZE];
         memset(buffer, 0, sizeof(buffer));
@@ -245,23 +238,30 @@ int main(int argc, char *argv[]) {
         if (strcmp(type, "map") == 0) {
             char *res = map_function(payload);
             strncpy(reply, res, MSG_SIZE - 1);
-            zmq_send(responder, reply, strlen(reply), 0);
+            // отправляем вместе с завершающим '\0'
+            int send_len = (int)(strlen(reply) + 1);
+            zmq_send(responder, reply, send_len, 0);
         }
         else if (strcmp(type, "red") == 0) {
             char *res = reduce_function(payload);
             strncpy(reply, res, MSG_SIZE - 1);
-            zmq_send(responder, reply, strlen(reply), 0);
+            int send_len = (int)(strlen(reply) + 1);
+            zmq_send(responder, reply, send_len, 0);
         }
         else if (strcmp(type, "rip") == 0) {
+            // отправим "rip\0"
             strcpy(reply, "rip");
-            zmq_send(responder, reply, strlen(reply), 0);
+            int send_len = (int)(strlen(reply) + 1);
+            zmq_send(responder, reply, send_len, 0);
             printf("Worker received rip -> exiting\n");
             fflush(stdout);
             break;
         }
         else {
             // неизвестный тип
-            zmq_send(responder, "", 0, 0);
+            // просто отправляем пустую строку "\0"
+            reply[0] = '\0';
+            zmq_send(responder, reply, 1, 0);
         }
     }
 
