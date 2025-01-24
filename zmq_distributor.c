@@ -431,6 +431,9 @@ int main(int argc, char *argv[])
         }
         pthread_mutex_unlock(&g_lock);
 
+        int rcvtimeo = 2000; // 2 секунды
+        zmq_setsockopt(reduce_socket, ZMQ_RCVTIMEO, &rcvtimeo, sizeof(rcvtimeo));
+
         // Build the reduce payload
         memset(reduce_msg, 0, sizeof(reduce_msg));
         build_reduce_payload(reduce_msg, MSG_SIZE);
