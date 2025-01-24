@@ -3,7 +3,7 @@
  *  Логика Дистрибьютора:
  *   - чтение файла
  *   - разбиение на куски (chunk_size ~ 1496)
- *   - запуск num_workers потоков (по одному на воркера)
+ *   - запуск num_workers потоков (по одному на каждого воркера)
  *   - каждый поток последовательно отправляет "map<...>" своему воркеру
  *   - сбор ответов, парсинг
  *   - reduce (пока есть данные) "red..." к одному воркеру
@@ -71,7 +71,7 @@ static void add_to_global_map(const char *word, int c) {
         }
         p = p->next;
     }
-    // Если не нашли — вставим в голову (это не влияет на порядок final, только на промежуточное хранение)
+    // Если не нашли — вставим в голову
     Pair *newp = malloc(sizeof(*newp));
     newp->word = strdup(word);
     newp->count = c;
@@ -161,8 +161,8 @@ static void *map_worker_thread(void *arg) {
 
 // -----------------------------------------------------------------------------
 // Формируем REDUCE: "red" + (word + '1'*count)
-// Если не хватает места на очередное слово, выходим (не удаляя слово из списка!),
-// чтобы при следующем проходе добавить оставшиеся слова
+// Если слово не влезает вообще (word длиной > оставшегося места), удаляем его
+// чтобы избежать бесконечного цикла.
 // -----------------------------------------------------------------------------
 static void build_reduce_payload(char *out, size_t outsize) {
     memset(out, 0, outsize);
@@ -177,27 +177,11 @@ static void build_reduce_payload(char *out, size_t outsize) {
         const char *w = p->word;
         int wlen = (int)strlen(w);
 
-        // Проверяем, влезет ли всё слово (без '1', хотя бы символы слова)
-        if (pos + wlen >= outsize - 1) {
-            // места не хватает -> выйдем, не удаляя p
-            break;
-        }
-
-        // Копируем слово
-        memcpy(out + pos, w, wlen);
-        pos += wlen;
-
-        // Теперь добавляем '1' какое-то количество
-        // Пока p->count > 0 и есть место
-        while (p->count > 0 && pos < outsize - 1) {
-            out[pos++] = '1';
-            p->count--;
-        }
-
-        // Если мы исчерпали count, удаляем из списка
-        if (p->count == 0) {
-            // удаляем из списка
-            Pair *to_free = p;
+        // Если само слово вообще не влезает (без учета '1'),
+        // нужно удалить его, чтобы не застревать
+        if (wlen >= (int)(outsize - pos - 1)) {
+            // удаляем пару
+            Pair *tmp = p;
             if (prev == NULL) {
                 g_map_results = p->next;
                 p = g_map_results;
@@ -205,15 +189,41 @@ static void build_reduce_payload(char *out, size_t outsize) {
                 prev->next = p->next;
                 p = prev->next;
             }
-            free(to_free->word);
-            free(to_free);
+            free(tmp->word);
+            free(tmp);
+            continue;
+        }
+
+        // Копируем слово
+        memcpy(out + pos, w, wlen);
+        pos += wlen;
+
+        // Добавляем '1' (пока есть место и есть count)
+        while (p->count > 0 && pos < outsize - 1) {
+            out[pos++] = '1';
+            p->count--;
+        }
+
+        // Если мы исчерпали count, то удаляем из списка
+        if (p->count == 0) {
+            Pair *tmp = p;
+            if (prev == NULL) {
+                g_map_results = p->next;
+                p = g_map_results;
+            } else {
+                prev->next = p->next;
+                p = prev->next;
+            }
+            free(tmp->word);
+            free(tmp);
         } else {
-            // значит, место в буфере кончилось на '1'
-            // не удаляем p, в следующий раз добавим оставшиеся '1'
+            // Если сюда дошли, значит место кончилось на '1'
+            // или pos==outsize-1, выходим из цикла
+            // (не удаляя элемент — пусть в следующем "red" добавит остаток)
             break;
         }
 
-        // Если достигли конца out-1, выходим
+        // Если уже нет места для следующего слова, выходим
         if (pos >= outsize - 1) {
             break;
         }
