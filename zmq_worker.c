@@ -27,7 +27,6 @@ typedef struct WordCount {
 // Добавляет (w, c) в список (head)
 static void add_word(WordCount **head, const char *w, int c) {
     WordCount *cur = *head;
-
     while (cur) {
         if (strcmp(cur->word, w) == 0) {
             cur->count += c;
@@ -45,7 +44,7 @@ static void add_word(WordCount **head, const char *w, int c) {
 // map_function: разбирает payload -> "the11example11..."
 static char *map_function(const char *payload) {
     char *copy = strdup(payload);
-    // Всё не-буквенное -> ' ', tolower
+    // Всё не-буквенное -> ' ', плюс tolower
     for (size_t i = 0; i < strlen(copy); i++) {
         if (!isalpha((unsigned char)copy[i])) {
             copy[i] = ' ';
@@ -56,7 +55,6 @@ static char *map_function(const char *payload) {
 
     WordCount *head = NULL;
     char *token = strtok(copy, " \t\r\n");
-
     while (token) {
         add_word(&head, token, 1);
         token = strtok(NULL, " \t\r\n");
@@ -70,16 +68,17 @@ static char *map_function(const char *payload) {
     WordCount *p = head;
     while (p) {
         int wlen = (int)strlen(p->word);
-        if (strcmp(p->word, "coenenchyma") == 0) {
-                printf("Match found: %s\n", p->word);
-                printf("%s\n", payload);
-            }
-        if (pos + wlen >= MSG_SIZE - 1) break;
+        if (pos + wlen >= MSG_SIZE - 1) {
+            // не влезает - прерываем
+            break;
+        }
         memcpy(result + pos, p->word, wlen);
         pos += wlen;
-
+        // дальше '1'*count (пока влезает)
         for (int i = 0; i < p->count; i++) {
-            if (pos >= MSG_SIZE - 1) break;
+            if (pos >= MSG_SIZE - 1) {
+                break;
+            }
             result[pos++] = '1';
         }
         p = p->next;
@@ -100,7 +99,6 @@ static char *map_function(const char *payload) {
 // reduce_function: "the11example11..." -> "the2example2..."
 static char *reduce_function(const char *payload) {
     WordCount *head = NULL;
-
     int i = 0;
     int n = (int)strlen(payload);
 
@@ -136,14 +134,19 @@ static char *reduce_function(const char *payload) {
     WordCount *p = head;
     while (p) {
         int wlen = (int)strlen(p->word);
-        if (pos + wlen >= MSG_SIZE - 1) break;
+        if (pos + wlen >= MSG_SIZE - 1) {
+            // не влезает - прерываем
+            break;
+        }
         memcpy(result + pos, p->word, wlen);
         pos += wlen;
 
         char numbuf[32];
         snprintf(numbuf, sizeof(numbuf), "%d", p->count);
         int numlen = (int)strlen(numbuf);
-        if (pos + numlen >= MSG_SIZE - 1) break;
+        if (pos + numlen >= MSG_SIZE - 1) {
+            break;
+        }
         memcpy(result + pos, numbuf, numlen);
         pos += numlen;
 
@@ -174,7 +177,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // REP‑сокет, биндим на все порты
+    // REP‑сокет, биндим на все указанные порты
     void *responder = zmq_socket(context, ZMQ_REP);
     if (!responder) {
         perror("zmq_socket");
@@ -182,7 +185,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // LINGER=0
     int linger = 0;
     zmq_setsockopt(responder, ZMQ_LINGER, &linger, sizeof(linger));
 
@@ -190,24 +192,17 @@ int main(int argc, char *argv[]) {
     int rcvtime = 2000;
     zmq_setsockopt(responder, ZMQ_RCVTIMEO, &rcvtime, sizeof(rcvtime));
 
-    // int worker_binded = 0;
     for (int i = 1; i < argc; i++) {
         char endpoint[64];
         snprintf(endpoint, sizeof(endpoint), "tcp://*:%s", argv[i]);
         if (zmq_bind(responder, endpoint) != 0) {
             perror("zmq_bind");
         } else {
-            // worker_binded = 1;
             printf("Worker bind to %s\n", endpoint);
             fflush(stdout);
         }
     }
-    // if (worker_binded == 0){
-    //     perror("zmq_bind");
-    //     zmq_ctx_destroy(context);
-    //     printf("Worker done.\n");
-    //     return 0;
-    // }
+
     // Цикл: ждём map/red/rip
     while (1) {
         char buffer[MSG_SIZE];
@@ -234,15 +229,12 @@ int main(int argc, char *argv[]) {
             // map
             char *res = map_function(payload);
             strncpy(reply, res, MSG_SIZE - 1);
-            // printf("Map reply message len: %zu\n", strlen(reply));
             zmq_send(responder, reply, strlen(reply), 0);
         }
         else if (strcmp(type, "red") == 0) {
             // reduce
-            // printf("Worker received red\n");
             char *res = reduce_function(payload);
             strncpy(reply, res, MSG_SIZE - 1);
-            // printf("Reduce reply message len: %zu\n", strlen(reply));
             zmq_send(responder, reply, strlen(reply), 0);
         }
         else if (strcmp(type, "rip") == 0) {
@@ -256,7 +248,6 @@ int main(int argc, char *argv[]) {
             // неизвестный тип
             zmq_send(responder, "", 0, 0);
         }
-
     }
 
     // Закрываем
