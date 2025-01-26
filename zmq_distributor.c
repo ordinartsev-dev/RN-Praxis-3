@@ -16,7 +16,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <pthread.h>
-#include <stdarg.h>   // <== для va_list/va_start/va_end
+#include <stdarg.h>
 #include <zmq.h>
 #include <unistd.h>
 
@@ -156,7 +156,6 @@ static void *map_worker_thread(void *arg) {
         memset(msg, 0, sizeof(msg));
         snprintf(msg, sizeof(msg), "map%s", g_chunks[i]);
 
-        // Логируем отправку
         debug_log("[map_worker_thread] thread=%d worker=%d sending='%s'\n",
                   my_index, task->worker_index, msg);
 
@@ -179,6 +178,13 @@ static void *map_worker_thread(void *arg) {
 
 // -------------------------------
 // Формируем REDUCE: "red" + (word + '1'*count)
+//
+// Главное исправление:
+//  - Если слово целиком не влезает в пакет => либо (a) выкидываем его,
+//    если оно больше самого outsize, либо (b) просто break, чтобы
+//    попробовать в следующем проходе.
+//  - Если при добавлении '1' место заканчивается, останавливаемся и
+//    НЕ удаляем слово (чтобы остаток '1' дописать в следующем проходе).
 // -------------------------------
 static void build_reduce_payload(char *out, size_t outsize) {
     memset(out, 0, outsize);
@@ -186,18 +192,22 @@ static void build_reduce_payload(char *out, size_t outsize) {
     size_t pos = 3;
 
     pthread_mutex_lock(&g_lock);
+
     Pair *prev = NULL;
     Pair *p = g_map_results;
+
+    // Максимальная длина САМОГО слова, чтобы вообще уместиться в пакет,
+    // учитывая "red" + '\0' (~4 байта)
+    size_t max_word_len = outsize - 4;
 
     while (p != NULL) {
         const char *w = p->word;
         int wlen = (int)strlen(w);
 
-        // Если слово само по себе не влезает
-        if (pos + wlen >= outsize - 1) {
-            // Чтобы не уйти в бесконечный цикл, удалим
-            debug_log("[build_reduce_payload] removing too-large word='%s'\n", p->word);
-
+        // Если слово само по себе больше, чем вообще может влезть
+        if (wlen > (int)max_word_len) {
+            // удаляем слово целиком (иначе зациклится)
+            debug_log("[build_reduce_payload] removing oversize word='%s'\n", w);
             if (prev == NULL) {
                 g_map_results = p->next;
             } else {
@@ -210,15 +220,24 @@ static void build_reduce_payload(char *out, size_t outsize) {
             continue;
         }
 
+        // Если сейчас слово не влезает по оставшемуся месту,
+        // то прерываемся (НЕ удаляя слово)
+        if (pos + wlen >= outsize - 1) {
+            debug_log("[build_reduce_payload] word='%s' doesn't fit => break\n", w);
+            break;
+        }
+
+        // Записываем слово
         memcpy(out + pos, w, wlen);
         pos += wlen;
 
-        // Добавляем '1' count раз (пока влезает)
+        // Пытаемся дописать '1' p->count раз (пока есть место)
         while (p->count > 0 && pos < outsize - 1) {
             out[pos++] = '1';
             p->count--;
         }
 
+        // Если исчерпали count -> удаляем слово из списка
         if (p->count == 0) {
             if (prev == NULL) {
                 g_map_results = p->next;
@@ -232,14 +251,20 @@ static void build_reduce_payload(char *out, size_t outsize) {
                 p = prev->next;
             }
         } else {
+            // Иначе (не весь count вылез), останемся в списке
+            // для следующего прохода
             prev = p;
             p = p->next;
+            // и выходим
+            break;
         }
 
+        // Проверяем, осталось ли место
         if (pos >= outsize - 1) {
             break;
         }
     }
+
     pthread_mutex_unlock(&g_lock);
 
     debug_log("[build_reduce_payload] result='%s'\n", out);
@@ -366,7 +391,7 @@ static void split_into_chunks(char *filecontent, size_t chunk_size) {
 // -------------------------------
 int main(int argc, char *argv[])
 {
-    // Очистим debug-файл в начале (если хотим каждый раз с нуля)
+    // Очистим debug-файл в начале
     FILE *df = fopen(DEBUG_LOGFILE, "w");
     if (df) fclose(df);
 
@@ -419,7 +444,6 @@ int main(int argc, char *argv[])
     // Запускаем map-потоки
     pthread_t *threads = malloc(num_workers * sizeof(pthread_t));
     WorkerTask *tasks = malloc(num_workers * sizeof(WorkerTask));
-
     for (int i = 0; i < num_workers; i++) {
         tasks[i].worker_index = i;
         tasks[i].endpoint = endpoints[i];
@@ -428,12 +452,12 @@ int main(int argc, char *argv[])
         pthread_create(&threads[i], NULL, map_worker_thread, &tasks[i]);
     }
 
-    // Ждём все map-потоки
+    // Ждём map-потоки
     for (int i = 0; i < num_workers; i++) {
         pthread_join(threads[i], NULL);
     }
 
-    // Выполняем reduce, используем endpoints[0]
+    // reduce: используем endpoints[0]
     void *reduce_socket = zmq_socket(g_zmq_context, ZMQ_REQ);
     if (!reduce_socket) {
         perror("zmq_socket reduce");
@@ -449,11 +473,12 @@ int main(int argc, char *argv[])
 
     while (1) {
         pthread_mutex_lock(&g_lock);
-        if (g_map_results == NULL) {
-            pthread_mutex_unlock(&g_lock);
+        int empty = (g_map_results == NULL);
+        pthread_mutex_unlock(&g_lock);
+
+        if (empty) {
             break;
         }
-        pthread_mutex_unlock(&g_lock);
 
         int rcvtimeo = 2000;
         zmq_setsockopt(reduce_socket, ZMQ_RCVTIMEO, &rcvtimeo, sizeof(rcvtimeo));
@@ -461,7 +486,7 @@ int main(int argc, char *argv[])
         char reduce_msg[MSG_SIZE];
         build_reduce_payload(reduce_msg, MSG_SIZE);
 
-        // Логируем перед отправкой reduce
+        // Логируем
         debug_log("[REDUCE send] '%s'\n", reduce_msg);
 
         if (zmq_send(reduce_socket, reduce_msg, strlen(reduce_msg), 0) == -1) {
@@ -474,7 +499,6 @@ int main(int argc, char *argv[])
         int r = zmq_recv(reduce_socket, reduce_reply, MSG_SIZE - 1, 0);
         if (r > 0) {
             reduce_reply[r] = '\0';
-            // Логируем ответ
             debug_log("[REDUCE recv] '%s'\n", reduce_reply);
             parse_reduce_reply(reduce_reply);
         } else if (r == -1) {
@@ -485,7 +509,7 @@ int main(int argc, char *argv[])
 
     zmq_close(reduce_socket);
 
-    // Собираем финальный результат
+    // Сортируем финальный результат
     int count_final = 0;
     pthread_mutex_lock(&g_final_lock);
     {
