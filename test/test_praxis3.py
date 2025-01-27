@@ -22,20 +22,23 @@ debug_tests = False
 
 @pytest.fixture
 def program_args(request):
-    d_exec = request.config.option.dist_exec
-    w_exec = request.config.option.work_exec
-    global debug_tests
-    debug_tests = request.config.option.debug_test
-    # cache = request.config.option.cache_texts
-    # cache_dir = request.config.option.cache_dir
-    return {"distributor": d_exec, "worker": w_exec}
-
-
-@pytest.mark.timeout(15)
-def test_workers_reachable(program_args):
     global test_args
-    test_args = util.init_tests(program_args)
+    if test_args is None:
+        d_exec = request.config.option.dist_exec
+        w_exec = request.config.option.work_exec
+        global debug_tests
+        debug_tests = request.config.option.debug_test
 
+        p_args = {"distributor": d_exec,
+                  "worker": w_exec,
+                  "no_cache": request.config.option.no_cache,
+                  "cache_dir": request.config.option.cache_dir}
+
+        test_args = util.init_tests(p_args)
+
+
+@pytest.mark.timeout(240)
+def test_workers_reachable(program_args):
     base_port = test_args["base_port"]
 
     for num_workers in [1, 2, 4, 8]:
@@ -87,27 +90,15 @@ def test_workers_reachable(program_args):
 
 
 @pytest.mark.timeout(15)
-def test_distributor_message_size():
-    word_list = util.get_part_of_word_list(test_args["word_list"], 250)
-
-    simple_delimiters = test_args["simple_delimiters"]
-
+def test_distributor_message_size(program_args):
     max_msg_size = 1500
-    max_string_length = 50 * max_msg_size
-
-    test_string = util.generate_text_from_word_list(word_list, simple_delimiters, max_string_length)
-
-    filename = test_args["filename_simple"]
-    f = open(filename, "w")
-    f.write(test_string)
-    f.close()
 
     port = str(test_args["base_port"])
 
     # kill any zmq procs currently running
     util.kill_zmq_distributor_and_worker()
 
-    proc = util.start_distributor([test_args["distributor"], filename, port])
+    proc = util.start_distributor([test_args["distributor"], test_args["filename_simple"], port])
 
     context = zmq.Context.instance()
     socket = context.socket(zmq.REP)
@@ -137,7 +128,7 @@ def test_distributor_message_size():
 
 
 @pytest.mark.timeout(60)
-def test_simple_text():
+def test_simple_text(program_args):
     filename_simple = test_args["filename_simple"]
 
     f = open(filename_simple, "r")
@@ -156,7 +147,7 @@ def test_simple_text():
         # launch worker and distributor
         worker_procs = util.start_threaded_workers(test_args["worker"], port_list)
         proc_distributor = util.start_distributor([test_args["distributor"], filename_simple] +
-                                                  port_list)
+                                      port_list)
 
         util.join_workers(worker_procs)
 
@@ -170,17 +161,11 @@ def test_simple_text():
 
 
 @pytest.mark.timeout(60)
-def test_complex_text():
-    word_list = util.get_part_of_word_list(test_args["word_list"], 2500)
-    all_delimiters = test_args["all_delimiters"]
-    max_string_length = 2.5e5
+def test_complex_text(program_args):
+    filename_complex = test_args["filename_complex"]
 
-    test_string = util.generate_text_from_word_list(word_list, all_delimiters, max_string_length)
-
-    filename = test_args["filename_complex"]
-
-    f = open(filename, "w")
-    f.write(test_string)
+    f = open(filename_complex, "r")
+    complex_text = f.read()
     f.close()
 
     base_port = test_args["base_port"]
@@ -194,13 +179,13 @@ def test_complex_text():
 
         # launch worker and distributor
         worker_procs = util.start_threaded_workers(test_args["worker"], port_list)
-        proc_distributor = util.start_distributor([test_args["distributor"], filename] +
-                                                  port_list)
+        proc_distributor = util.start_distributor([test_args["distributor"], filename_complex] +
+                                      port_list)
 
         util.join_workers(worker_procs)
 
         distributor_output, distributor_err = proc_distributor.communicate()
-        correct_word_count = util.count_words(test_string)
+        correct_word_count = util.count_words(complex_text)
 
         if debug_tests:
             util.create_test_debug_output("test_complex_text", num_workers, correct_word_count, distributor_output)
@@ -209,7 +194,7 @@ def test_complex_text():
 
 
 @pytest.mark.timeout(90)
-def test_book_1():
+def test_book_1(program_args):
     filename = test_args["filename_book_1"]
     base_port = test_args["base_port"]
     book_text = test_args["books"][0]
@@ -228,7 +213,7 @@ def test_book_1():
         # launch worker and distributor
         worker_procs = util.start_threaded_workers(test_args["worker"], port_list)
         proc_distributor = util.start_distributor([test_args["distributor"], filename] +
-                                                  port_list)
+                                           port_list)
 
         util.join_workers(worker_procs)
 
@@ -244,7 +229,7 @@ def test_book_1():
 
 
 @pytest.mark.timeout(90)
-def test_book_2():
+def test_book_2(program_args):
     filename = test_args["filename_book_2"]
     base_port = test_args["base_port"]
     book_text = test_args["books"][1]
@@ -263,7 +248,7 @@ def test_book_2():
         # launch worker and distributor
         worker_procs = util.start_threaded_workers(test_args["worker"], port_list)
         proc_distributor = util.start_distributor([test_args["distributor"], filename] +
-                                                  port_list)
+                                           port_list)
 
         util.join_workers(worker_procs)
 
@@ -279,7 +264,7 @@ def test_book_2():
 
 
 @pytest.mark.timeout(30)
-def test_interoperability():
+def test_interoperability(program_args):
     base_port = test_args["base_port"]
 
     # test workers first
@@ -312,19 +297,16 @@ def test_interoperability():
             message = socket.recv()
             message = message.decode("ascii")
             curr_responses.append(message)
-            # assert message == map_message_expected_return
 
             socket.send(bytes("red" + map_message_expected_return, "ascii"))
             message = socket.recv()
             message = message.decode("ascii")
             curr_responses.append(message)
-            # assert message == reduce_message_expected_return
 
             socket.send(bytes(rip_message, "ascii"))
             message = socket.recv()
             message = message.decode("ascii")
             curr_responses.append(message)
-            # assert message == rip_message
 
             socket.close()
 
@@ -362,22 +344,16 @@ def test_interoperability():
 
     message = socket.recv()
     message = message.decode("ascii")
-    # print(message)
-    # assert message == map_message
     distributor_messages.append(message)
     socket.send(bytes(map_message_expected_return, "ascii"))
 
     message = socket.recv()
     message = message.decode("ascii")
-    # print(message)
-    # assert message == "red" + map_message_expected_return
     distributor_messages.append(message)
     socket.send(bytes(reduce_message_expected_return, "ascii"))
 
     message = socket.recv()
     message = message.decode("ascii")
-    # print(message)
-    # assert message == rip_message
     distributor_messages.append(message)
     socket.send(bytes(rip_message, "ascii"))
 
@@ -393,7 +369,7 @@ def test_interoperability():
 
 
 @pytest.mark.timeout(60)
-def test_load_distribution():
+def test_load_distribution(program_args):
     base_port = test_args["base_port"]
 
     for num_workers in [2, 4, 8]:
@@ -433,13 +409,13 @@ def test_load_distribution():
 
 
 @pytest.mark.timeout(120)
-def test_memory_leaks():
+def test_memory_leaks(program_args):
     global test_args
 
     valgrind_output_file = "valgrind_output"
     valgrind_command_base = ["valgrind", "--tool=memcheck", "--xml=yes", "--xml-file=" + valgrind_output_file,
-                             "--gen-suppressions=all", "--leak-check=full", "--leak-resolution=med", "--track-origins=yes",
-                             "--trace-children=yes", "--vgdb=no", "--fair-sched=yes"]
+                        "--gen-suppressions=all", "--leak-check=full", "--leak-resolution=med", "--track-origins=yes",
+                        "--trace-children=yes", "--vgdb=no", "--fair-sched=yes"]
 
     valgrind_command_distributor = valgrind_command_base.copy()
     valgrind_command_distributor[3] = "--xml-file=" + valgrind_output_file + "_distributor.xml"
@@ -484,7 +460,7 @@ def test_memory_leaks():
         # launch worker and distributor
         proc_workers = util.start_threaded_workers(valgrind_commands_worker[:num_workers], port_list)
         proc_distributor = util.start_distributor(valgrind_command_distributor + [test_args["distributor"], valgrind_test_filename] +
-                                                  port_list)
+                                      port_list)
 
         proc_distributor.wait()
         util.join_workers(proc_workers)
@@ -500,7 +476,7 @@ def test_memory_leaks():
 
 
 @pytest.mark.timeout(3)
-def test_valgrind_second_point_and_cleanup():
+def test_valgrind_second_point_and_cleanup(program_args):
     time.sleep(1)
     # kill any zmq procs currently running, including memcheck this time
     util.kill_zmq_distributor_and_worker(kill_memcheck=True)

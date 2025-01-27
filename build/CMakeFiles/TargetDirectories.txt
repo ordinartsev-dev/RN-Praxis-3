@@ -1,4 +1,6 @@
 /Users/egorordinarcev/Desktop/praxis3/build/CMakeFiles/zmq_distributor.dir
 /Users/egorordinarcev/Desktop/praxis3/build/CMakeFiles/zmq_worker.dir
+/Users/egorordinarcev/Desktop/praxis3/build/CMakeFiles/package.dir
+/Users/egorordinarcev/Desktop/praxis3/build/CMakeFiles/package_source.dir
 /Users/egorordinarcev/Desktop/praxis3/build/CMakeFiles/edit_cache.dir
 /Users/egorordinarcev/Desktop/praxis3/build/CMakeFiles/rebuild_cache.dir

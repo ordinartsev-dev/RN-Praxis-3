@@ -92,6 +92,7 @@ zmq_distributor_EXTERNAL_OBJECTS =
 
 zmq_distributor: CMakeFiles/zmq_distributor.dir/zmq_distributor.c.o
 zmq_distributor: CMakeFiles/zmq_distributor.dir/build.make
+zmq_distributor: /opt/homebrew/lib/libzmq.dylib
 zmq_distributor: CMakeFiles/zmq_distributor.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/egorordinarcev/Desktop/praxis3/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking C executable zmq_distributor"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/zmq_distributor.dir/link.txt --verbose=$(VERBOSE)

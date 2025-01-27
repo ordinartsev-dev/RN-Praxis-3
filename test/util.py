@@ -25,8 +25,11 @@ def init_tests(args):
 
     distributor_exec = args["distributor"]
     worker_exec = args["worker"]
-    # cache = args["cache"]
-    # cache_dir = args["cache_dir"]
+    no_cache = args["no_cache"]
+    cache_dir = "test_files/"
+
+    if args["cache_dir"] != "":
+        cache_dir = args["cache_dir"]
 
     simple_delimiters = [", ", ". ", " "]
     all_delimiters = [x + " " for x in string.punctuation]
@@ -37,27 +40,49 @@ def init_tests(args):
     base_port = 6001
     base_port = check_ports_free(base_port)
 
-    word_list_url = "https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt"
-    word_list = None
-    for i in range(4):
-        try:
-            url_content = requests.get(word_list_url, timeout=5)
-            word_list = url_content.text.splitlines()
-            break
-        except requests.exceptions.Timeout:
-            continue
-    if word_list is None:
-        sys.exit("Failed to get word list. Can not run tests without it. Quitting...")
+    word_list_path = cache_dir + "word_list.txt"
 
     book_base_url = "https://www.gutenberg.org/cache/epub/"
-    book_options = ["1513/pg1513.txt", "2701/pg2701.txt", "1342/pg1342.txt", "84/pg84.txt", "145/pg145.txt"]
-    book_1 = random.choice(book_options)
-    book_options.remove(book_1)
-    book_2 = random.choice(book_options)
-    book_text_1 = get_book_text(book_base_url + book_1)
-    book_list = [book_text_1]
-    book_text_2 = get_book_text(book_base_url + book_2)
-    book_list.append(book_text_2)
+    book_urls = ["84/pg84.txt",
+                 "145/pg145.txt",
+                 "1342/pg1342.txt",
+                 "1513/pg1513.txt",
+                 "2701/pg2701.txt"]
+    # book_urls = ["84/pg84.txt",
+    #              "1342/pg1342.txt",
+    #              "16389/pg16389.txt",
+    #              "50150/pg50150.txt",
+    #              "67979/pg67979.txt",
+    #              "75201/pg75201.txt"]
+
+
+    books_selected = [random.choice(book_urls)]
+    book_urls.remove(books_selected[0])
+    books_selected.append(random.choice(book_urls))
+
+    if not os.path.exists(cache_dir):
+        os.mkdir(cache_dir)
+
+    if not os.path.isfile(word_list_path):
+        download_word_list(word_list_path)
+
+    with open(word_list_path, "r") as f:
+        word_list = f.read().splitlines()
+
+    book_list = []
+
+    for b in books_selected:
+        book_path = cache_dir + b.split("/")[1]
+
+        existing_book_size = 1
+        if os.path.isfile(book_path):
+            existing_book_size = os.path.getsize(book_path)
+        if not os.path.isfile(book_path) or existing_book_size == 0:
+            book_url = book_base_url + b
+            download_book(book_url, book_path)
+
+        with open(book_path, "r") as f:
+            book_list.append(f.read().encode("ascii", errors="ignore"))
 
     filename_book_1 = "book_1.txt"
     filename_book_2 = "book_2.txt"
@@ -67,10 +92,11 @@ def init_tests(args):
     filename_valgrind = "valgrind_test.txt"
 
 
-    test_args = {"distributor": distributor_exec,
+    test_args = {"is_ubuntu20_eecs_system": is_ubuntu20_eecs(),
+                 "distributor": distributor_exec,
                  "worker": worker_exec,
-                 # "cache": cache,
-                 # "cache_dir": cache_dir,
+                 "no_cache": no_cache,
+                 "cache_dir": cache_dir,
                  "simple_delimiters": simple_delimiters,
                  "all_delimiters": all_delimiters,
                  "filename_simple": filename_simple,
@@ -84,7 +110,24 @@ def init_tests(args):
                  "filename_valgrind": filename_valgrind,
                  }
 
+    generate_test_files(test_args)
+
     return test_args
+
+# check if current system is Ubuntu 20 EECS test system
+def is_ubuntu20_eecs():
+    return True
+
+    # required_operating_system = "Operating System: Ubuntu 20.04.6 LTS"
+    # required_domain_name = "eecsit.tu-berlin.de"
+    #
+    # hostnamectl = subprocess.Popen("hostnamectl", stdout=subprocess.PIPE)
+    # os_name = subprocess.check_output(["grep", "-o", "Operating System:.*"], stdin=hostnamectl.stdout).decode("utf-8").strip()
+    # hostnamectl.wait()
+    #
+    # domain_name = subprocess.check_output(["hostname", "-d"]).decode("utf-8").strip()
+    #
+    # return required_operating_system == os_name and required_domain_name == domain_name
 
 
 # checks if the base port and all following 8 ports are actually free for testing
@@ -111,6 +154,96 @@ def check_ports_free(base_port):
         base_port += 10
         base_port = check_ports_free(base_port)
     return base_port
+
+def download_word_list(output_path):
+    word_list_url = "https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt"
+    word_list = None
+    try:
+        url_content = requests.get(word_list_url, timeout=5)
+        word_list = url_content.text
+    except requests.exceptions.Timeout:
+        sys.exit("Failed to get word list. Can not run tests without it. Quitting...")
+    if word_list is None:
+        sys.exit("Failed to get word list. Can not run tests without it. Quitting...")
+
+    with open(output_path, "w") as f:
+        f.write(word_list)
+
+
+def download_book(url, output_path):
+    # book_text = None
+    # try:
+    #     url_content = requests.get(url, timeout=90, stream=True)
+    #     book_text = url_content.text
+    # except requests.exceptions.Timeout:
+    #     sys.exit("Failed to get book text. Can not run tests without it. Quitting...")
+    # if book_text is None:
+    #     sys.exit("Failed to get book text. Can not run tests without it. Quitting...")
+    #
+    # with open(output_path, "w") as f:
+    #     f.write(book_text)
+
+    #### code based on https://stackoverflow.com/a/77873699
+    session = requests.Session()
+    book = b""
+    expected_length = None
+    i = 0
+    while len(book) != expected_length and i < 15:
+        if len(book):
+            headers = {"Range": f"bytes={len(book)}-"}
+            expected_status = 206
+        else:
+            headers = {}
+            expected_status = 200
+        # print(f"{url}: got {len(book)} / {expected_length} bytes...")
+        resp = session.get(url, stream=True, headers=headers)
+        resp.raise_for_status()
+        if resp.status_code != expected_status:
+            raise ValueError(f"Unexpected status code: {resp.status_code}")
+        if expected_length is None:  # Only update this on the first request
+            content_length = resp.headers.get("Content-Length")
+            if not content_length:
+                raise ValueError("Content-Length header not found")
+            expected_length = int(content_length)
+
+        try:
+            for chunk in resp.iter_content(chunk_size=8192):
+                book += chunk
+        except requests.exceptions.ChunkedEncodingError:
+            pass
+        i += 1
+    if len(book) != expected_length:
+        sys.exit("Failed to get book text. Can not run tests without it. Quitting...")
+    #### code end
+
+    with open(output_path, "w") as f:
+        f.write(book.decode("utf-8",errors="ignore"))
+
+
+def generate_test_files(test_args):
+    # generate simple file
+    word_list = get_part_of_word_list(test_args["word_list"], 250)
+    simple_delimiters = test_args["simple_delimiters"]
+
+    max_msg_size = 1500
+    max_string_length = 50 * max_msg_size
+
+    test_string = generate_text_from_word_list(word_list, simple_delimiters, max_string_length)
+
+    f = open(test_args["filename_simple"], "w")
+    f.write(test_string)
+    f.close()
+
+    # generate complex file
+    word_list = get_part_of_word_list(test_args["word_list"], 2500)
+    all_delimiters = test_args["all_delimiters"]
+    max_string_length = 2.5e5
+
+    test_string = generate_text_from_word_list(word_list, all_delimiters, max_string_length)
+
+    f = open(test_args["filename_complex"], "w")
+    f.write(test_string)
+    f.close()
 
 
 def kill_zmq_distributor_and_worker(kill_memcheck=False):
@@ -181,19 +314,6 @@ def count_words(input_string):
         output_string += w[0] + "," + str(w[1]) + "\n"
 
     return output_string
-
-def get_book_text(url):
-    book_text = None
-    for i in range(4):
-        try:
-            url_content = requests.get(url, timeout=5)
-            book_text = url_content.text.encode(encoding="ascii", errors="ignore")
-            break
-        except requests.exceptions.Timeout:
-            continue
-    if book_text is None:
-        sys.exit("Failed to get book text. Can not run tests without it. Quitting...")
-    return book_text
 
 
 def create_test_debug_output(test_name, num_w, expected_output, dist_output):
@@ -299,3 +419,6 @@ def cleanup_files(test_args, remove_valgrind_files=True):
             continue
         if "filename" in k and os.path.isfile(v):
             os.remove(v)
+
+    if test_args["no_cache"]:
+        shutil.rmtree(test_args["cache_dir"])
