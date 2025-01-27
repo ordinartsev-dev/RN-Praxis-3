@@ -36,7 +36,9 @@ def test_book_small(program_args):
     book_text_full = test_args["books"][0]
 
     # Take only the first 2048 bytes for a smaller test
-    small_text = book_text_full[:2048]
+    #small_text = book_text_full[:2048]
+    small_text = book_text_full[:5000]
+
 
     # We'll reuse the same filename as e.g. "filename_book_small"
     filename_small = test_args["filename_book_1"] + "_small"
