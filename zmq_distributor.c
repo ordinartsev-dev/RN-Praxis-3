@@ -2,11 +2,10 @@
  *  zmq_distributor.c
  *  Логика Дистрибьютора:
  *   - чтение файла
- *   - разбиение на куски (chunk_size ~ 1496, чтобы влезало "map")
- *   - запуск num_workers потоков (по одному на каждого воркера)
- *   - каждый поток последовательно отправляет "map<...>" своему воркеру
+ *   - разбиение на строки
+ *   - отправка "map..." воркерам
  *   - сбор ответов, парсинг
- *   - reduce (пока есть данные) "red..." к одному воркеру
+ *   - отправка "red..." одному воркеру
  *   - финальная сортировка и вывод
  *   - "rip" всем воркерам
  *************************************************************/
@@ -16,30 +15,10 @@
 #include <string.h>
 #include <ctype.h>
 #include <pthread.h>
-#include <stdarg.h>
 #include <zmq.h>
 #include <unistd.h>
 
 #define MSG_SIZE 1500
-
-// -------------------------------
-// Определим путь к файлу отладки
-// -------------------------------
-#define DEBUG_LOGFILE "debug_output.txt"
-
-// Утилита для записи отладочной информации в файл
-static void debug_log(const char *fmt, ...)
-{
-    FILE *f = fopen(DEBUG_LOGFILE, "a");  // открываем на добавление
-    if (!f) return;  // если не удалось открыть, просто пропускаем
-
-    va_list args;
-    va_start(args, fmt);
-    vfprintf(f, fmt, args);
-    va_end(args);
-
-    fclose(f);
-}
 
 // -------------------------------
 // Структуры
@@ -53,17 +32,11 @@ typedef struct Pair {
 static Pair *g_map_results = NULL;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
-// Список из чанков
-static char **g_chunks = NULL;
-static size_t g_num_chunks = 0;
-static size_t g_chunks_capacity = 0;
-
-typedef struct WorkerTask {
-    int worker_index;     // к какому воркеру/endpoint подключаться
-    char *endpoint;       // tcp://localhost:port
-    int thread_index;     // индекс самого потока (0..num_workers-1)
-    int total_workers;    // всего воркеров = num_workers
-} WorkerTask;
+typedef struct WorkerInfo {
+    int index;
+    char *endpoint;
+    char *chunk;
+} WorkerInfo;
 
 void *g_zmq_context = NULL;
 
@@ -77,11 +50,15 @@ static FinalPair *g_final_list = NULL;
 static pthread_mutex_t g_final_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // -------------------------------
-// Добавляем (word, count) в g_map_results
+// Вспомогательные функции
 // -------------------------------
+
+// Добавляет (word, count) в g_map_results в конец списка
 static void add_to_global_map(const char *word, int c) {
     pthread_mutex_lock(&g_lock);
+
     Pair *p = g_map_results;
+
     while (p) {
         if (strcmp(p->word, word) == 0) {
             p->count += c;
@@ -90,24 +67,46 @@ static void add_to_global_map(const char *word, int c) {
         }
         p = p->next;
     }
+
     Pair *newp = malloc(sizeof(*newp));
+    if (!newp) {
+        pthread_mutex_unlock(&g_lock);
+        return;
+    }
+
     newp->word = strdup(word);
+    if (!newp->word) {
+        free(newp);
+        pthread_mutex_unlock(&g_lock);
+        return;
+    }
+
     newp->count = c;
-    newp->next = g_map_results;
-    g_map_results = newp;
+    newp->next = NULL;
+
+    if (g_map_results == NULL) {
+        g_map_results = newp;
+    } else {
+        Pair *last = g_map_results;
+        while (last->next) {
+            last = last->next;
+        }
+        last->next = newp;
+    }
+
     pthread_mutex_unlock(&g_lock);
 }
 
+
 // Парсит ответ MAP: "the11example111..."
 static void parse_map_reply(const char *reply) {
-    debug_log("[parse_map_reply] worker reply='%s'\n", reply);
-
     int i = 0;
     int n = (int)strlen(reply);
 
     while (i < n) {
         char word_buf[256];
         int wpos = 0;
+        // собираем буквы
         while (i < n && isalpha((unsigned char)reply[i])) {
             if (wpos < 255) {
                 word_buf[wpos++] = reply[i];
@@ -117,6 +116,7 @@ static void parse_map_reply(const char *reply) {
         word_buf[wpos] = '\0';
 
         int count = 0;
+        // собираем подряд '1'
         while (i < n && reply[i] == '1') {
             count++;
             i++;
@@ -131,12 +131,14 @@ static void parse_map_reply(const char *reply) {
 // -------------------------------
 // Поток: отправляет map<chunk>, парсит ответ
 // -------------------------------
-static void *map_worker_thread(void *arg) {
-    WorkerTask *task = (WorkerTask *)arg;
-    int my_index = task->thread_index;
-    int step = task->total_workers;
+static void *map_thread(void *arg) {
+    WorkerInfo *info = (WorkerInfo *)arg;
 
     void *req = zmq_socket(g_zmq_context, ZMQ_REQ);
+    // while (!req) {
+        // sleep(0.01);
+        // req = zmq_socket(g_zmq_context, ZMQ_REQ);
+    // }
     if(!req){
         perror("zmq_socket map_thread");
         return NULL;
@@ -144,33 +146,28 @@ static void *map_worker_thread(void *arg) {
     int linger = 0;
     zmq_setsockopt(req, ZMQ_LINGER, &linger, sizeof(linger));
 
-    if (zmq_connect(req, task->endpoint) != 0) {
+    if (zmq_connect(req, info->endpoint) != 0) {
         perror("zmq_connect map_thread");
         zmq_close(req);
         return NULL;
     }
 
-    // Перебираем все чанки, которые должен обработать этот поток
-    for (size_t i = my_index; i < g_num_chunks; i += step) {
-        char msg[MSG_SIZE];
-        memset(msg, 0, sizeof(msg));
-        snprintf(msg, sizeof(msg), "map%s", g_chunks[i]);
+    // Формируем "map" + chunk
+    char msg[MSG_SIZE];
+    memset(msg, 0, sizeof(msg));
+    snprintf(msg, sizeof(msg), "map%s", info->chunk);
+    msg[MSG_SIZE - 1]= '\0';
+    // printf("Map request message len: %zu\n", strlen(msg));
+    zmq_send(req, msg, strlen(msg)+1, 0);
 
-        debug_log("[map_worker_thread] thread=%d worker=%d sending='%s'\n",
-                  my_index, task->worker_index, msg);
-
-        // Отправляем
-        zmq_send(req, msg, strlen(msg), 0);
-
-        // Получаем ответ
-        char reply[MSG_SIZE];
-        memset(reply, 0, sizeof(reply));
-        int rsize = zmq_recv(req, reply, sizeof(reply) - 1, 0);
-        if (rsize > 0) {
-            reply[rsize] = '\0';
-            parse_map_reply(reply);
-        }
+    char reply[MSG_SIZE];
+    memset(reply, 0, sizeof(reply));
+    int rsize = zmq_recv(req, reply, sizeof(reply) - 1, 0);
+    if (rsize > 0) {
+        reply[rsize] = '\0';
+        parse_map_reply(reply);
     }
+
 
     zmq_close(req);
     return NULL;
@@ -178,101 +175,80 @@ static void *map_worker_thread(void *arg) {
 
 // -------------------------------
 // Формируем REDUCE: "red" + (word + '1'*count)
-//
-// Главное исправление:
-//  - Если слово целиком не влезает в пакет => либо (a) выкидываем его,
-//    если оно больше самого outsize, либо (b) просто break, чтобы
-//    попробовать в следующем проходе.
-//  - Если при добавлении '1' место заканчивается, останавливаемся и
-//    НЕ удаляем слово (чтобы остаток '1' дописать в следующем проходе).
 // -------------------------------
+// static void build_reduce_payload(char *out, size_t outsize) {
+//     memset(out, 0, outsize);
+//     strcpy(out, "red");
+//     size_t pos = 3;
+
+//     pthread_mutex_lock(&g_lock);
+//     for (Pair *p = g_map_results; p != NULL; p = p->next) {
+//         const char *w = p->word;
+//         int wlen = (int)strlen(w);
+//         if (pos + wlen < outsize - 1) {
+//             memcpy(out + pos, w, wlen);
+//             pos += wlen;
+//         }
+//         for (int i = 0; i < p->count; i++) {
+//             if (pos < outsize - 1) {
+//                 out[pos++] = '1';
+//             } else {
+//                 break;
+//             }
+//         }
+//     }
+//     pthread_mutex_unlock(&g_lock);
+// }
 static void build_reduce_payload(char *out, size_t outsize) {
     memset(out, 0, outsize);
     strcpy(out, "red");
     size_t pos = 3;
-
     pthread_mutex_lock(&g_lock);
-
-    Pair *prev = NULL;
+    Pair *prev = NULL; // To track the previous node for deletion if count reaches 0
     Pair *p = g_map_results;
-
-    // Максимальная длина САМОГО слова, чтобы вообще уместиться в пакет,
-    // учитывая "red" + '\0' (~4 байта)
-    size_t max_word_len = outsize - 4;
 
     while (p != NULL) {
         const char *w = p->word;
+
         int wlen = (int)strlen(w);
-
-        // Если слово само по себе больше, чем вообще может влезть
-        if (wlen > (int)max_word_len) {
-            // удаляем слово целиком (иначе зациклится)
-            debug_log("[build_reduce_payload] removing oversize word='%s'\n", w);
-            if (prev == NULL) {
-                g_map_results = p->next;
-            } else {
-                prev->next = p->next;
-            }
-            free(p->word);
-            Pair *tmp = p;
-            p = p->next;
-            free(tmp);
-            continue;
+        // Add the word to the payload if it fits
+        if (pos + wlen < outsize - 1) {
+            memcpy(out + pos, w, wlen);
+            pos += wlen;
+        } else {
+            break; // Not enough space for this word, stop here
         }
-
-        // Если сейчас слово не влезает по оставшемуся месту,
-        // то прерываемся (НЕ удаляя слово)
-        if (pos + wlen >= outsize - 1) {
-            debug_log("[build_reduce_payload] word='%s' doesn't fit => break\n", w);
-            break;
-        }
-
-        // Записываем слово
-        memcpy(out + pos, w, wlen);
-        pos += wlen;
-
-        // Пытаемся дописать '1' p->count раз (пока есть место)
+        // Add the '1's for the current word
         while (p->count > 0 && pos < outsize - 1) {
             out[pos++] = '1';
             p->count--;
         }
 
-        // Если исчерпали count -> удаляем слово из списка
+        // If this word is fully processed, remove it from the list
         if (p->count == 0) {
             if (prev == NULL) {
+                // Head of the list
                 g_map_results = p->next;
                 free(p->word);
                 free(p);
                 p = g_map_results;
             } else {
+                // Middle or end of the list
                 prev->next = p->next;
                 free(p->word);
                 free(p);
                 p = prev->next;
             }
         } else {
-            // Иначе (не весь count вылез), останемся в списке
-            // для следующего прохода
             prev = p;
             p = p->next;
-            // и выходим
-            break;
-        }
-
-        // Проверяем, осталось ли место
-        if (pos >= outsize - 1) {
-            break;
         }
     }
-
     pthread_mutex_unlock(&g_lock);
-
-    debug_log("[build_reduce_payload] result='%s'\n", out);
 }
 
-// -------------------------------
-// Добавляем (word, c) в g_final_list
-// -------------------------------
+
+// Добавляет (word, c) в g_final_list
 static void add_to_final_list(const char *word, int c) {
     pthread_mutex_lock(&g_final_lock);
     FinalPair *fp = g_final_list;
@@ -294,8 +270,6 @@ static void add_to_final_list(const char *word, int c) {
 
 // Парсит REDUCE ответ: "the2example2..."
 static void parse_reduce_reply(const char *reply) {
-    debug_log("[parse_reduce_reply] worker reply='%s'\n", reply);
-
     int i = 0;
     int n = (int)strlen(reply);
 
@@ -322,12 +296,13 @@ static void parse_reduce_reply(const char *reply) {
 
         if (wpos > 0 && np > 0) {
             int c = atoi(num_buf);
+
             add_to_final_list(word_buf, c);
         }
     }
 }
 
-// Сортируем FinalPair: убывание по count, при равенстве — алфавит
+// Сортируем FinalPair: убывание по частоте, потом алфавит
 static int cmpfunc(const void *a, const void *b) {
     const FinalPair *fa = *(const FinalPair **)a;
     const FinalPair *fb = *(const FinalPair **)b;
@@ -336,65 +311,11 @@ static int cmpfunc(const void *a, const void *b) {
     return strcmp(fa->word, fb->word);
 }
 
-// -------------------------------
-// Функция разбивки filecontent на чанки
-// -------------------------------
-static void add_chunk(char *start, size_t len) {
-    if (g_num_chunks == g_chunks_capacity) {
-        size_t newcap = (g_chunks_capacity == 0) ? 256 : g_chunks_capacity * 2;
-        g_chunks = realloc(g_chunks, newcap * sizeof(*g_chunks));
-        g_chunks_capacity = newcap;
-    }
-    g_chunks[g_num_chunks] = strndup(start, len);
-
-    // Логируем созданный чанк
-    debug_log("[split_into_chunks] chunk#%zu='%s'\n", g_num_chunks, g_chunks[g_num_chunks]);
-
-    g_num_chunks++;
-}
-
-static void split_into_chunks(char *filecontent, size_t chunk_size) {
-    debug_log("=== Starting to split the file into chunks (chunk_size=%zu) ===\n", chunk_size);
-
-    char *ptr = filecontent;
-    while (*ptr) {
-        size_t len = strlen(ptr);
-        if (len == 0) {
-            break;
-        }
-        size_t actual_chunk_size = (len > chunk_size) ? chunk_size : len;
-
-        // Попытка не резать слово, если не конец файла
-        if (actual_chunk_size < len && ptr[actual_chunk_size] != ' ') {
-            size_t tmp = actual_chunk_size;
-            while (tmp > 0 && ptr[tmp - 1] != ' ') {
-                tmp--;
-            }
-            if (tmp > 0) {
-                actual_chunk_size = tmp;
-            }
-        }
-
-        add_chunk(ptr, actual_chunk_size);
-
-        ptr += actual_chunk_size;
-        // пропустим пробелы
-        while (*ptr == ' ') {
-            ptr++;
-        }
-    }
-    debug_log("=== Done splitting into %zu chunks ===\n", g_num_chunks);
-}
-
-// -------------------------------
+// -----------------------------------------------------------------------------
 // MAIN Distributor
-// -------------------------------
+// -----------------------------------------------------------------------------
 int main(int argc, char *argv[])
 {
-    // Очистим debug-файл в начале
-    FILE *df = fopen(DEBUG_LOGFILE, "w");
-    if (df) fclose(df);
-
     if (argc < 3) {
         fprintf(stderr, "Usage: %s <file.txt> <port1> [<port2> ...]\n", argv[0]);
         return 1;
@@ -434,35 +355,90 @@ int main(int argc, char *argv[])
     filecontent[fsize] = '\0';
     fclose(fp);
 
-    // Сохраняем весь исходный текст в дебаг
-    debug_log("=== Original file content (size=%ld) ===\n%s\n=== End of file content ===\n",
-              fsize, filecontent);
+    // Стартуем потоки map (по строкам)
+    pthread_t threads[1024];
+    int thread_count = 0;
 
-    // Разбиваем на чанки
-    split_into_chunks(filecontent, 1496);
+    char *file_ptr = filecontent; // Pointer to track the current position in filecontent
+    size_t chunk_size = 1496;    // Maximum chunk size
+    while (*file_ptr) {
+        WorkerInfo *wi = malloc(sizeof(*wi));
 
-    // Запускаем map-потоки
-    pthread_t *threads = malloc(num_workers * sizeof(pthread_t));
-    WorkerTask *tasks = malloc(num_workers * sizeof(WorkerTask));
-    for (int i = 0; i < num_workers; i++) {
-        tasks[i].worker_index = i;
-        tasks[i].endpoint = endpoints[i];
-        tasks[i].thread_index = i;
-        tasks[i].total_workers = num_workers;
-        pthread_create(&threads[i], NULL, map_worker_thread, &tasks[i]);
+        // Choose a worker in round-robin fashion
+        static int worker_index = 0;
+        int widx = worker_index % num_workers;
+        worker_index++;
+
+        wi->index = widx;
+        wi->endpoint = endpoints[widx];
+
+        // Extract up to 1497 characters
+        size_t len = strlen(file_ptr);
+        size_t actual_chunk_size = (len > chunk_size) ? chunk_size : len;
+
+        // Ensure the chunk ends at a space if it's not the last part of the file
+        if (actual_chunk_size < len && file_ptr[actual_chunk_size] != ' ') {
+            while (actual_chunk_size > 0 && file_ptr[actual_chunk_size - 1] != ' ') {
+                actual_chunk_size--;
+            }
+        }
+
+        // Create a new chunk with the extracted part
+        wi->chunk = strndup(file_ptr, actual_chunk_size);
+
+        // Update the file pointer to the next part of the file
+        file_ptr += actual_chunk_size;
+
+        // Skip leading spaces to start at the next word
+        while (*file_ptr == ' ') {
+            file_ptr++;
+        }
+
+        // Create the thread to process this chunk
+        pthread_create(&threads[thread_count], NULL, map_thread, wi);
+        thread_count++;
     }
 
-    // Ждём map-потоки
-    for (int i = 0; i < num_workers; i++) {
+
+    // Ждём завершения map-потоков
+    for (int i = 0; i < thread_count; i++) {
         pthread_join(threads[i], NULL);
     }
 
-    // reduce: используем endpoints[0]
+    // Выполняем reduce, используем воркер[0]
+    // void *reduce_socket = zmq_socket(g_zmq_context, ZMQ_REQ);
+    // if (!reduce_socket) {
+    //     perror("zmq_socket reduce");
+    //     return 1;
+    // }
+    // int linger = 0;
+    // zmq_setsockopt(reduce_socket, ZMQ_LINGER, &linger, sizeof(linger));
+
+    // if (zmq_connect(reduce_socket, endpoints[0]) != 0) {
+    //     perror("zmq_connect reduce");
+    //     return 1;
+    // }
+
+    // char reduce_msg[MSG_SIZE];
+
+    // build_reduce_payload(reduce_msg, MSG_SIZE);
+    // zmq_send(reduce_socket, reduce_msg, strlen(reduce_msg), 0);
+
+    // char reduce_reply[MSG_SIZE];
+    // memset(reduce_reply, 0, sizeof(reduce_reply));
+    // int r = zmq_recv(reduce_socket, reduce_reply, MSG_SIZE - 1, 0);
+    // if (r > 0) {
+    //     reduce_reply[r] = '\0';
+    //     parse_reduce_reply(reduce_reply);
+    // }
+
+    // zmq_close(reduce_socket);
     void *reduce_socket = zmq_socket(g_zmq_context, ZMQ_REQ);
     if (!reduce_socket) {
         perror("zmq_socket reduce");
         return 1;
     }
+
     int linger = 0;
     zmq_setsockopt(reduce_socket, ZMQ_LINGER, &linger, sizeof(linger));
 
@@ -471,35 +447,33 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    char reduce_msg[MSG_SIZE];
+
     while (1) {
         pthread_mutex_lock(&g_lock);
-        int empty = (g_map_results == NULL);
+        if (g_map_results == NULL) {
+            pthread_mutex_unlock(&g_lock);
+            break; // Exit the loop when g_map_results is empty
+        }
         pthread_mutex_unlock(&g_lock);
 
-        if (empty) {
-            break;
-        }
-
-        int rcvtimeo = 2000;
-        zmq_setsockopt(reduce_socket, ZMQ_RCVTIMEO, &rcvtimeo, sizeof(rcvtimeo));
-
-        char reduce_msg[MSG_SIZE];
+        // Build the reduce payload
+        memset(reduce_msg, 0, sizeof(reduce_msg));
         build_reduce_payload(reduce_msg, MSG_SIZE);
-
-        // Логируем
-        debug_log("[REDUCE send] '%s'\n", reduce_msg);
-
-        if (zmq_send(reduce_socket, reduce_msg, strlen(reduce_msg), 0) == -1) {
+        reduce_msg[MSG_SIZE - 1] = '\0';
+        // printf("Reduce message len: %zu\n", strlen(reduce_msg));
+        // Send the reduce message to the worker
+        if (zmq_send(reduce_socket, reduce_msg, strlen(reduce_msg)+1, 0) == -1) {
             perror("zmq_send reduce");
             break;
         }
 
+        // Receive the reduce reply from the worker
         char reduce_reply[MSG_SIZE];
         memset(reduce_reply, 0, sizeof(reduce_reply));
         int r = zmq_recv(reduce_socket, reduce_reply, MSG_SIZE - 1, 0);
         if (r > 0) {
             reduce_reply[r] = '\0';
-            debug_log("[REDUCE recv] '%s'\n", reduce_reply);
             parse_reduce_reply(reduce_reply);
         } else if (r == -1) {
             perror("zmq_recv reduce");
@@ -509,7 +483,8 @@ int main(int argc, char *argv[])
 
     zmq_close(reduce_socket);
 
-    // Сортируем финальный результат
+
+    // Собираем и сортируем результаты
     int count_final = 0;
     pthread_mutex_lock(&g_final_lock);
     {
@@ -535,13 +510,7 @@ int main(int argc, char *argv[])
 
     qsort(arr, count_final, sizeof(FinalPair*), cmpfunc);
 
-    // Записываем финальный результат в debug
-    debug_log("=== Final reduce results ===\n");
-    for (int i = 0; i < count_final; i++) {
-        debug_log("%s,%d\n", arr[i]->word, arr[i]->count);
-    }
-
-    // Печатаем CSV на stdout
+    // Печатаем CSV
     printf("word,frequency\n");
     for (int i = 0; i < count_final; i++) {
         printf("%s,%d\n", arr[i]->word, arr[i]->count);
@@ -554,7 +523,7 @@ int main(int argc, char *argv[])
         if (s) {
             zmq_setsockopt(s, ZMQ_LINGER, &linger, sizeof(linger));
             if (zmq_connect(s, endpoints[i]) == 0) {
-                zmq_send(s, "rip", 3, 0);
+                zmq_send(s, "rip\0", 4, 0);
 
                 char rbuf[MSG_SIZE];
                 int rr2 = zmq_recv(s, rbuf, MSG_SIZE - 1, 0);
@@ -569,19 +538,11 @@ int main(int argc, char *argv[])
 
     zmq_ctx_destroy(g_zmq_context);
 
-    // Очистка
+    // Очистка памяти
     for (int i = 0; i < num_workers; i++) {
         free(endpoints[i]);
     }
     free(endpoints);
-    free(tasks);
-    free(threads);
-
-    for (size_t i = 0; i < g_num_chunks; i++) {
-        free(g_chunks[i]);
-    }
-    free(g_chunks);
-
     free(filecontent);
 
     return 0;
