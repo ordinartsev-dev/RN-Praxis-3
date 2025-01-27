@@ -135,20 +135,24 @@ static void *map_thread(void *arg) {
     WorkerInfo *info = (WorkerInfo *)arg;
 
     void *req = zmq_socket(g_zmq_context, ZMQ_REQ);
-    // while (!req) {
-        // sleep(0.01);
-        // req = zmq_socket(g_zmq_context, ZMQ_REQ);
-    // }
-    if(!req){
-        perror("zmq_socket map_thread");
-        return NULL;
+    while (!req) {
+        sleep(0.05);
+        req = zmq_socket(g_zmq_context, ZMQ_REQ);
     }
+    // if(!req){
+    //     perror("zmq_socket map_thread");
+    //     free(info->chunk);
+    //     free(info);
+    //     return NULL;
+    // }
     int linger = 0;
     zmq_setsockopt(req, ZMQ_LINGER, &linger, sizeof(linger));
 
     if (zmq_connect(req, info->endpoint) != 0) {
         perror("zmq_connect map_thread");
         zmq_close(req);
+        free(info->chunk);
+        free(info);
         return NULL;
     }
 
@@ -167,8 +171,8 @@ static void *map_thread(void *arg) {
         reply[rsize] = '\0';
         parse_map_reply(reply);
     }
-
-
+    free(info->chunk);
+    free(info);
     zmq_close(req);
     return NULL;
 }
@@ -405,6 +409,7 @@ int main(int argc, char *argv[])
         pthread_join(threads[i], NULL);
     }
 
+
     // Выполняем reduce, используем воркер[0]
     // void *reduce_socket = zmq_socket(g_zmq_context, ZMQ_REQ);
     // if (!reduce_socket) {
@@ -481,8 +486,41 @@ int main(int argc, char *argv[])
         }
     }
 
+
     zmq_close(reduce_socket);
 
+    // KILL THEM ALLL
+    for (int i = 0; i < num_workers; i++) {
+        fprintf(stderr, "Sending rip");
+        void *s = zmq_socket(g_zmq_context, ZMQ_REQ);
+        if (!s) {
+            perror("zmq_socket rip");
+            zmq_close(s);
+            zmq_ctx_destroy(g_zmq_context);
+            return 1;
+        }
+        zmq_setsockopt(s, ZMQ_LINGER, &linger, sizeof(linger));
+        if (zmq_connect(s, endpoints[i]) != 0) {
+            perror("zmq_connect rip");
+            zmq_close(s);
+            zmq_ctx_destroy(g_zmq_context);
+            return 1;
+        }
+
+        zmq_send(s, "rip\0", 4, 0);
+
+        char rbuf[MSG_SIZE];
+        int rr2 = zmq_recv(s, rbuf, MSG_SIZE - 1, 0);
+        if (rr2 > 0) {
+            rbuf[rr2] = '\0';
+            // ожидаем "rip"
+        }
+
+        zmq_close(s);
+
+    }
+
+    zmq_ctx_destroy(g_zmq_context);
 
     // Собираем и сортируем результаты
     int count_final = 0;
@@ -509,34 +547,43 @@ int main(int argc, char *argv[])
     pthread_mutex_unlock(&g_final_lock);
 
     qsort(arr, count_final, sizeof(FinalPair*), cmpfunc);
+    fprintf(stderr, "Output of %d words", count_final);
 
     // Печатаем CSV
     printf("word,frequency\n");
     for (int i = 0; i < count_final; i++) {
         printf("%s,%d\n", arr[i]->word, arr[i]->count);
+
     }
+    fprintf(stderr, "Printed csv");
     free(arr);
 
-    // rip всем воркерам
-    for (int i = 0; i < num_workers; i++) {
-        void *s = zmq_socket(g_zmq_context, ZMQ_REQ);
-        if (s) {
-            zmq_setsockopt(s, ZMQ_LINGER, &linger, sizeof(linger));
-            if (zmq_connect(s, endpoints[i]) == 0) {
-                zmq_send(s, "rip\0", 4, 0);
 
-                char rbuf[MSG_SIZE];
-                int rr2 = zmq_recv(s, rbuf, MSG_SIZE - 1, 0);
-                if (rr2 > 0) {
-                    rbuf[rr2] = '\0';
-                    // ожидаем "rip"
-                }
-            }
-            zmq_close(s);
-        }
-    }
+    // for (int i = 0; i < num_workers; i++) {
+    //     void *s = zmq_socket(g_zmq_context, ZMQ_REQ);
+    //     if (!s) {
+    //         perror("zmq_socket rip");
+    //         return 1;
+    //     }
+    //     if (s) {
 
-    zmq_ctx_destroy(g_zmq_context);
+    //         zmq_setsockopt(s, ZMQ_LINGER, &linger, sizeof(linger));
+    //         if (zmq_connect(s, endpoints[i]) == 0) {
+
+    //             zmq_send(s, "rip\0", 4, 0);
+
+    //             char rbuf[MSG_SIZE];
+    //             int rr2 = zmq_recv(s, rbuf, MSG_SIZE - 1, 0);
+    //             if (rr2 > 0) {
+    //                 rbuf[rr2] = '\0';
+    //                 // ожидаем "rip"
+    //             }
+    //         }
+    //         zmq_close(s);
+    //     }
+    // }
+
+
 
     // Очистка памяти
     for (int i = 0; i < num_workers; i++) {
