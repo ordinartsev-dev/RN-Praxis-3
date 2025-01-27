@@ -37,7 +37,7 @@ def test_book_small(program_args):
 
     # Take only the first 2048 bytes for a smaller test
     #small_text = book_text_full[:2048]
-    small_text = book_text_full[:50000]
+    small_text = book_text_full[:150000]
 
 
     # We'll reuse the same filename as e.g. "filename_book_small"
