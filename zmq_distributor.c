@@ -533,7 +533,7 @@ int main(int argc, char *argv[])
         if (s) {
             zmq_setsockopt(s, ZMQ_LINGER, &linger, sizeof(linger));
             if (zmq_connect(s, endpoints[i]) == 0) {
-                zmq_send(s, "rip", 3, 0);
+                zmq_send(s, "rip", 3 + 1, 0);
 
                 char rbuf[MSG_SIZE];
                 int rr2 = zmq_recv(s, rbuf, MSG_SIZE - 1, 0);
