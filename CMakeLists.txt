@@ -4,11 +4,11 @@ set(CMAKE_C_STANDARD 11)
 
 find_library(ZeroMQ zmq REQUIRED)
 
-add_executable(zmq_distributor <source files>)
+add_executable(zmq_distributor zmq_distributor.c)
 target_compile_options(zmq_distributor PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(zmq_distributor PRIVATE zmq pthread)
 
-add_executable(zmq_worker <source files>)
+add_executable(zmq_worker zmq_worker.c)
 target_compile_options(zmq_worker PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(zmq_worker PRIVATE zmq pthread)
 
