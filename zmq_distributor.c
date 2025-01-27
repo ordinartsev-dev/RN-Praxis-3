@@ -160,7 +160,7 @@ static void *map_worker_thread(void *arg) {
                   my_index, task->worker_index, i);
 
         // отправляем
-        zmq_send(req, msg, strlen(msg), 0);
+        zmq_send(req, msg, strlen(msg) + 1, 0);
 
         // ответ
         char reply[MSG_SIZE];
@@ -473,7 +473,7 @@ int main(int argc, char *argv[])
 
         debug_log("[REDUCE send] '%s'\n", reduce_msg);
 
-        if (zmq_send(reduce_socket, reduce_msg, strlen(reduce_msg), 0) == -1) {
+        if (zmq_send(reduce_socket, reduce_msg, strlen(reduce_msg) + 1, 0) == -1) {
             perror("zmq_send reduce");
             break;
         }
