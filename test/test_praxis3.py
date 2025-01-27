@@ -156,7 +156,7 @@ def test_simple_text():
         # launch worker and distributor
         worker_procs = util.start_threaded_workers(test_args["worker"], port_list)
         proc_distributor = util.start_distributor([test_args["distributor"], filename_simple] +
-                                      port_list)
+                                                  port_list)
 
         util.join_workers(worker_procs)
 
@@ -195,7 +195,7 @@ def test_complex_text():
         # launch worker and distributor
         worker_procs = util.start_threaded_workers(test_args["worker"], port_list)
         proc_distributor = util.start_distributor([test_args["distributor"], filename] +
-                                      port_list)
+                                                  port_list)
 
         util.join_workers(worker_procs)
 
@@ -228,7 +228,7 @@ def test_book_1():
         # launch worker and distributor
         worker_procs = util.start_threaded_workers(test_args["worker"], port_list)
         proc_distributor = util.start_distributor([test_args["distributor"], filename] +
-                                           port_list)
+                                                  port_list)
 
         util.join_workers(worker_procs)
 
@@ -263,7 +263,7 @@ def test_book_2():
         # launch worker and distributor
         worker_procs = util.start_threaded_workers(test_args["worker"], port_list)
         proc_distributor = util.start_distributor([test_args["distributor"], filename] +
-                                           port_list)
+                                                  port_list)
 
         util.join_workers(worker_procs)
 
@@ -438,8 +438,8 @@ def test_memory_leaks():
 
     valgrind_output_file = "valgrind_output"
     valgrind_command_base = ["valgrind", "--tool=memcheck", "--xml=yes", "--xml-file=" + valgrind_output_file,
-                        "--gen-suppressions=all", "--leak-check=full", "--leak-resolution=med", "--track-origins=yes",
-                        "--trace-children=yes", "--vgdb=no", "--fair-sched=yes"]
+                             "--gen-suppressions=all", "--leak-check=full", "--leak-resolution=med", "--track-origins=yes",
+                             "--trace-children=yes", "--vgdb=no", "--fair-sched=yes"]
 
     valgrind_command_distributor = valgrind_command_base.copy()
     valgrind_command_distributor[3] = "--xml-file=" + valgrind_output_file + "_distributor.xml"
@@ -484,7 +484,7 @@ def test_memory_leaks():
         # launch worker and distributor
         proc_workers = util.start_threaded_workers(valgrind_commands_worker[:num_workers], port_list)
         proc_distributor = util.start_distributor(valgrind_command_distributor + [test_args["distributor"], valgrind_test_filename] +
-                                      port_list)
+                                                  port_list)
 
         proc_distributor.wait()
         util.join_workers(proc_workers)
