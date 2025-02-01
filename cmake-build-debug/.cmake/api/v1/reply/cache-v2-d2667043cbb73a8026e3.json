@@ -851,7 +851,7 @@
 				}
 			],
 			"type" : "STATIC",
-			"value" : "zmq_wordcount"
+			"value" : "RN-Praxis"
 		},
 		{
 			"name" : "CMAKE_RANLIB",
@@ -1354,7 +1354,55 @@
 			"value" : "[TRUE][v()]"
 		},
 		{
+			"name" : "RN-Praxis_BINARY_DIR",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Value Computed by CMake"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "/Users/egorordinarcev/Desktop/praxis3/cmake-build-debug"
+		},
+		{
+			"name" : "RN-Praxis_IS_TOP_LEVEL",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Value Computed by CMake"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "ON"
+		},
+		{
+			"name" : "RN-Praxis_SOURCE_DIR",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Value Computed by CMake"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "/Users/egorordinarcev/Desktop/praxis3"
+		},
+		{
 			"name" : "ZMQ_LIB",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Path to a library."
+				}
+			],
+			"type" : "FILEPATH",
+			"value" : "/opt/homebrew/lib/libzmq.dylib"
+		},
+		{
+			"name" : "ZeroMQ",
 			"properties" : 
 			[
 				{

@@ -146,7 +146,7 @@ CMAKE_PROJECT_DESCRIPTION:STATIC=
 CMAKE_PROJECT_HOMEPAGE_URL:STATIC=
 
 //Value Computed by CMake
-CMAKE_PROJECT_NAME:STATIC=zmq_wordcount
+CMAKE_PROJECT_NAME:STATIC=RN-Praxis
 
 //Path to a program.
 CMAKE_RANLIB:FILEPATH=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ranlib
@@ -249,8 +249,20 @@ CPACK_BINARY_TGZ:BOOL=ON
 //Enable to build TXZ packages
 CPACK_BINARY_TXZ:BOOL=OFF
 
+//Value Computed by CMake
+RN-Praxis_BINARY_DIR:STATIC=/Users/egorordinarcev/Desktop/praxis3/cmake-build-debug
+
+//Value Computed by CMake
+RN-Praxis_IS_TOP_LEVEL:STATIC=ON
+
+//Value Computed by CMake
+RN-Praxis_SOURCE_DIR:STATIC=/Users/egorordinarcev/Desktop/praxis3
+
 //Path to a library.
 ZMQ_LIB:FILEPATH=/opt/homebrew/lib/libzmq.dylib
+
+//Path to a library.
+ZeroMQ:FILEPATH=/opt/homebrew/lib/libzmq.dylib
 
 //Value Computed by CMake
 untitled_BINARY_DIR:STATIC=/Users/egorordinarcev/Desktop/praxis3/cmake-build-debug

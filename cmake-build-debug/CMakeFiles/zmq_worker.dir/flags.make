@@ -4,9 +4,9 @@
 # compile C with /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/cc
 C_DEFINES = 
 
-C_INCLUDES = -I/opt/homebrew/include
+C_INCLUDES = 
 
-C_FLAGSarm64 = -I/opt/homebrew/Cellar/zeromq/4.3.5_1/include -L/opt/homebrew/Cellar/zeromq/4.3.5_1/lib -g -std=gnu11 -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk -mmacosx-version-min=14.6 -fcolor-diagnostics
+C_FLAGSarm64 = -I/opt/homebrew/Cellar/zeromq/4.3.5_1/include -L/opt/homebrew/Cellar/zeromq/4.3.5_1/lib -g -std=gnu11 -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk -mmacosx-version-min=14.6 -fcolor-diagnostics -Wall -Wextra -Wpedantic
 
-C_FLAGS = -I/opt/homebrew/Cellar/zeromq/4.3.5_1/include -L/opt/homebrew/Cellar/zeromq/4.3.5_1/lib -g -std=gnu11 -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk -mmacosx-version-min=14.6 -fcolor-diagnostics
+C_FLAGS = -I/opt/homebrew/Cellar/zeromq/4.3.5_1/include -L/opt/homebrew/Cellar/zeromq/4.3.5_1/lib -g -std=gnu11 -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk -mmacosx-version-min=14.6 -fcolor-diagnostics -Wall -Wextra -Wpedantic
 

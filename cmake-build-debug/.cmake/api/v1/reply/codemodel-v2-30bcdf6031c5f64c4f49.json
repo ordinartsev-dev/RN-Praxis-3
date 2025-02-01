@@ -9,7 +9,7 @@
 					"jsonFile" : "directory-.-Debug-f5ebdc15457944623624.json",
 					"minimumCMakeVersion" : 
 					{
-						"string" : "3.10"
+						"string" : "3.5"
 					},
 					"projectIndex" : 0,
 					"source" : ".",
@@ -28,7 +28,7 @@
 					[
 						0
 					],
-					"name" : "zmq_wordcount",
+					"name" : "RN-Praxis",
 					"targetIndexes" : 
 					[
 						0,
@@ -41,14 +41,14 @@
 				{
 					"directoryIndex" : 0,
 					"id" : "zmq_distributor::@6890427a1f51a3e7e1df",
-					"jsonFile" : "target-zmq_distributor-Debug-7cdc18ec01b8e200f4ce.json",
+					"jsonFile" : "target-zmq_distributor-Debug-4073df2e99047af54b34.json",
 					"name" : "zmq_distributor",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 0,
 					"id" : "zmq_worker::@6890427a1f51a3e7e1df",
-					"jsonFile" : "target-zmq_worker-Debug-90d5e4fd5260816e0fa2.json",
+					"jsonFile" : "target-zmq_worker-Debug-fb39a76a0f36e6115bc1.json",
 					"name" : "zmq_worker",
 					"projectIndex" : 0
 				}

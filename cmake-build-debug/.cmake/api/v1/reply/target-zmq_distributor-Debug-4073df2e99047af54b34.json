@@ -11,9 +11,8 @@
 		"commands" : 
 		[
 			"add_executable",
-			"link_directories",
 			"target_link_libraries",
-			"include_directories"
+			"target_compile_options"
 		],
 		"files" : 
 		[
@@ -27,25 +26,19 @@
 			{
 				"command" : 0,
 				"file" : 0,
-				"line" : 14,
+				"line" : 7,
 				"parent" : 0
 			},
 			{
 				"command" : 1,
 				"file" : 0,
-				"line" : 11,
+				"line" : 9,
 				"parent" : 0
 			},
 			{
 				"command" : 2,
 				"file" : 0,
-				"line" : 15,
-				"parent" : 0
-			},
-			{
-				"command" : 3,
-				"file" : 0,
-				"line" : 10,
+				"line" : 8,
 				"parent" : 0
 			}
 		]
@@ -57,13 +50,18 @@
 			[
 				{
 					"fragment" : "-I/opt/homebrew/Cellar/zeromq/4.3.5_1/include -L/opt/homebrew/Cellar/zeromq/4.3.5_1/lib -g -std=gnu11 -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk -mmacosx-version-min=14.6 -fcolor-diagnostics"
-				}
-			],
-			"includes" : 
-			[
+				},
 				{
-					"backtrace" : 4,
-					"path" : "/opt/homebrew/include"
+					"backtrace" : 3,
+					"fragment" : "-Wall"
+				},
+				{
+					"backtrace" : 3,
+					"fragment" : "-Wextra"
+				},
+				{
+					"backtrace" : 3,
+					"fragment" : "-Wpedantic"
 				}
 			],
 			"language" : "C",
@@ -96,16 +94,12 @@
 			},
 			{
 				"backtrace" : 2,
-				"fragment" : "-L/opt/homebrew/lib",
-				"role" : "libraryPath"
-			},
-			{
-				"fragment" : "-Wl,-rpath,/opt/homebrew/lib",
+				"fragment" : "-lzmq",
 				"role" : "libraries"
 			},
 			{
-				"backtrace" : 3,
-				"fragment" : "-lzmq",
+				"backtrace" : 2,
+				"fragment" : "-lpthread",
 				"role" : "libraries"
 			}
 		],

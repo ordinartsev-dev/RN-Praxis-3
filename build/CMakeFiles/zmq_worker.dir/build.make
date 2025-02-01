@@ -92,7 +92,6 @@ zmq_worker_EXTERNAL_OBJECTS =
 
 zmq_worker: CMakeFiles/zmq_worker.dir/zmq_worker.c.o
 zmq_worker: CMakeFiles/zmq_worker.dir/build.make
-zmq_worker: /opt/homebrew/lib/libzmq.dylib
 zmq_worker: CMakeFiles/zmq_worker.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/egorordinarcev/Desktop/praxis3/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking C executable zmq_worker"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/zmq_worker.dir/link.txt --verbose=$(VERBOSE)
